@@ -3,11 +3,11 @@ services:
     image: postgres:17-alpine
     container_name: dispatchr-postgres
     environment:
-      POSTGRES_USER: dispatchr
-      POSTGRES_PASSWORD: dispatchr
-      POSTGRES_DB: dispatchr
+      POSTGRES_USER: ${DISPATCHR_DB_USER}
+      POSTGRES_PASSWORD: ${DISPATCHR_DB_PASSWORD}
+      POSTGRES_DB: ${DISPATCHR_DB_NAME}
     ports:
-      - "15432:5432"
+      - "${DISPATCHR_DB_PORT}:5432"
     volumes:
       - dispatchr-postgres-data:/var/lib/postgresql/data
     healthcheck:
