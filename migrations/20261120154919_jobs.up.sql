@@ -22,3 +22,4 @@ CREATE TABLE jobs (
     CONSTRAINT jobs_status_check CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
     CONSTRAINT jobs_attempts_check CHECK (attempts >= 0 AND max_attempts > 0)
 );
+
