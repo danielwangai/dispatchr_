@@ -17,10 +17,17 @@ build:
 	go build -o bin/dispatchr ./cmd/api
 
 run:
-	go run ./cmd/api
+	go run ./cmd/api -v
 
-test:
+# unit test
+unit-test:
 	go test ./... -v
+
+# integration test
+integration-test: test-db-migrate
+	@set -a; . "$(ENV_FILE)"; set +a; \
+		DISPATCHR_TEST_DATABASE_URL="postgres://$$DISPATCHR_DB_USER:$$DISPATCHR_DB_PASSWORD@localhost:$$DISPATCHR_DB_PORT/$$DISPATCHR_TEST_DB_NAME?sslmode=$$DISPATCHR_DB_SSL_MODE" \
+		go test -count=1 -v -tags=integration ./internal/storage/postgres
 
 go-fmt:
 	gofmt -w $$(rg --files -g '*.go')
@@ -55,9 +62,3 @@ test-db-create:
 
 test-db-migrate: test-db-create
 	$(MIGRATE_TEST) up
-
-integration-test: test-db-migrate
-	@set -a; . "$(ENV_FILE)"; set +a; \
-		DISPATCHR_TEST_DATABASE_URL="postgres://$$DISPATCHR_DB_USER:$$DISPATCHR_DB_PASSWORD@localhost:$$DISPATCHR_DB_PORT/$$DISPATCHR_TEST_DB_NAME?sslmode=$$DISPATCHR_DB_SSL_MODE" \
-		go test -tags=integration ./internal/storage/postgres
-

@@ -13,6 +13,7 @@ import (
 
 	"github.com/danielwangai/dispatchr/internal/jobs"
 	"github.com/danielwangai/dispatchr/internal/storage/postgres"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,6 +21,7 @@ func TestStoreCreateAndGet(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
 
+	// Arrange.
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
 	job := jobs.Job{
 		ID:          "00000000-0000-0000-0000-000000000001",
@@ -33,6 +35,7 @@ func TestStoreCreateAndGet(t *testing.T) {
 	}
 
 	store := postgres.New(pool)
+	// Act.
 	if err := store.Create(context.Background(), job); err != nil {
 		t.Fatalf("create job: %v", err)
 	}
@@ -42,6 +45,7 @@ func TestStoreCreateAndGet(t *testing.T) {
 		t.Fatalf("get job: %v", err)
 	}
 
+	// Assert.
 	if got.ID != job.ID || got.Type != job.Type || got.Status != job.Status || got.Attempts != job.Attempts || got.MaxAttempts != job.MaxAttempts {
 		t.Fatalf("got job metadata %#v, want %#v", got, job)
 	}
@@ -54,13 +58,114 @@ func TestStoreCreateAndGet(t *testing.T) {
 	}
 }
 
-func TestStoreGetMissingJob(t *testing.T) {
+func TestStoreGetNonExistentJob(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
 
+	// Act.
 	_, err := postgres.New(pool).Get(context.Background(), "00000000-0000-0000-0000-000000000002")
+
+	// Assert.
 	if !errors.Is(err, jobs.ErrNotFound) {
 		t.Fatalf("get missing job error = %v, want jobs.ErrNotFound", err)
+	}
+}
+
+func TestStoreCreateAndGetFailedJob(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+
+	// Arrange.
+	lastError := "email provider returned 503"
+	completedAt := time.Now().UTC().Truncate(time.Microsecond)
+	job := jobs.Job{
+		ID:          "00000000-0000-0000-0000-000000000003",
+		Type:        "send_email",
+		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
+		Status:      jobs.StatusFailed,
+		Attempts:    3,
+		MaxAttempts: 3,
+		LastError:   &lastError,
+		CompletedAt: &completedAt,
+		CreatedAt:   completedAt,
+		UpdatedAt:   completedAt,
+	}
+
+	store := postgres.New(pool)
+	// Act.
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatalf("create failed job: %v", err)
+	}
+
+	got, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get failed job: %v", err)
+	}
+
+	// Assert.
+	if got.LastError == nil || *got.LastError != lastError {
+		t.Fatalf("got last_error %v, want %q", got.LastError, lastError)
+	}
+	if got.CompletedAt == nil || !got.CompletedAt.Equal(completedAt) {
+		t.Fatalf("got completed_at %v, want %s", got.CompletedAt, completedAt)
+	}
+}
+
+func TestStoreCreateRejectsDuplicateID(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+
+	// Arrange.
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	job := jobs.Job{
+		ID:          "00000000-0000-0000-0000-000000000004",
+		Type:        "send_email",
+		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
+		Status:      jobs.StatusPending,
+		MaxAttempts: 3,
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt,
+	}
+	store := postgres.New(pool)
+	// create job(first time)
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatalf("create first job: %v", err)
+	}
+
+	// Act.
+	// create job as duplicate(run store.Create twice with the same job)
+	err := store.Create(context.Background(), job)
+
+	// Assert.
+	var databaseError *pgconn.PgError
+	if !errors.As(err, &databaseError) || databaseError.Code != "23505" {
+		t.Fatalf("duplicate create error = %v, want PostgreSQL unique violation", err)
+	}
+}
+
+func TestStoreCreateRejectsZeroMaxAttempts(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+
+	// Arrange.
+	createdAt := time.Now().UTC().Truncate(time.Microsecond)
+	job := jobs.Job{
+		ID:          "00000000-0000-0000-0000-000000000005",
+		Type:        "send_email",
+		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
+		Status:      jobs.StatusPending,
+		MaxAttempts: 0,
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt,
+	}
+
+	// Act.
+	err := postgres.New(pool).Create(context.Background(), job)
+
+	// Assert.
+	var databaseError *pgconn.PgError
+	if !errors.As(err, &databaseError) || databaseError.Code != "23514" {
+		t.Fatalf("create error = %v, want PostgreSQL check violation", err)
 	}
 }
 
