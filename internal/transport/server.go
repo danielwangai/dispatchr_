@@ -12,6 +12,7 @@ import (
 
 	"github.com/danielwangai/dispatchr/internal/config"
 	"github.com/danielwangai/dispatchr/internal/logging"
+	"github.com/danielwangai/dispatchr/internal/storage/postgres"
 )
 
 // Server owns the application's HTTP transport dependencies.
@@ -52,6 +53,12 @@ func RunServer() error {
 	// Cancel on Ctrl+C or a container shutdown signal.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	pool, err := postgres.NewPool(ctx, appConfig.DB)
+	if err != nil {
+		return fmt.Errorf("connect to PostgreSQL: %w", err)
+	}
+	defer pool.Close()
 
 	server := NewServer(appConfig.WebServer.Port)
 

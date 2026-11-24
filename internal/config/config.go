@@ -3,6 +3,7 @@ package config
 
 import (
 	"errors"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,23 @@ type PostgresConfig struct {
 	DBName   string `envconfig:"DB_NAME"`
 	Password string `envconfig:"DB_PASSWORD"`
 	Host     string `envconfig:"DB_HOST"`
+	Port     string `envconfig:"DB_PORT" default:"5432"`
 	SSLMode  string `envconfig:"DB_SSL_MODE" default:"disable"`
+}
+
+// ConnectionString returns a pgx-compatible PostgreSQL connection string.
+func (c PostgresConfig) ConnectionString() string {
+	connectionURL := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(c.Username, c.Password),
+		Host:   c.Host + ":" + c.Port,
+		Path:   c.DBName,
+	}
+
+	query := connectionURL.Query()
+	query.Set("sslmode", c.SSLMode)
+	connectionURL.RawQuery = query.Encode()
+	return connectionURL.String()
 }
 
 // LoggingConfig contains structured logging settings.
