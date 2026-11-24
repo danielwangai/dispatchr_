@@ -10,6 +10,8 @@ var (
 	ErrNotFound = errors.New("job not found")
 	// ErrNoJobAvailable indicates that there are no pending jobs to claim.
 	ErrNoJobAvailable = errors.New("no job available")
+	// ErrInvalidState indicates that a job cannot make the requested transition.
+	ErrInvalidState = errors.New("invalid job state")
 )
 
 // Store contains method for coordinating the lifecycle jobs.

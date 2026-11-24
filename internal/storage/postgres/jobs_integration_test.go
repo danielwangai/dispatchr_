@@ -276,6 +276,93 @@ func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
 	}
 }
 
+// TestStoreComplete marks a processing job as completed.
+func TestStoreComplete(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+	store := postgres.New(pool)
+
+	// Arrange a job already claimed by a worker.
+	job := processingJob("00000000-0000-0000-0000-000000000009", time.Now().UTC().Truncate(time.Microsecond))
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	// Act: record successful execution.
+	if err := store.Complete(context.Background(), job.ID); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	// Assert: the job is completed and has a completion time.
+	got, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != jobs.StatusCompleted || got.CompletedAt == nil || got.LastError != nil {
+		t.Fatalf("completed job %#v, want completed status, completion time, and no error", got)
+	}
+}
+
+// TestStoreFail marks a processing job as failed and preserves its error.
+func TestStoreFail(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+	store := postgres.New(pool)
+
+	// Arrange a job already claimed by a worker.
+	job := processingJob("00000000-0000-0000-0000-000000000010", time.Now().UTC().Truncate(time.Microsecond))
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	// Act: record a handler failure.
+	const reason = "email provider returned 503"
+	if err := store.Fail(context.Background(), job.ID, reason); err != nil {
+		t.Fatalf("fail job: %v", err)
+	}
+
+	// Assert: the job is failed with its failure details.
+	got, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != jobs.StatusFailed || got.CompletedAt == nil || got.LastError == nil || *got.LastError != reason {
+		t.Fatalf("failed job %#v, want failed status, completion time, and error %q", got, reason)
+	}
+}
+
+// TestStoreCompletionTransitionsRejectPendingJobs verifies workers cannot finish unclaimed jobs.
+func TestStoreCompletionTransitionsRejectPendingJobs(t *testing.T) {
+	pool := testPool(t)
+	clea rJobs(t, pool)
+	store := postgres.New(pool)
+
+	// Arrange a job that no worker has claimed.
+	job := pendingJob("00000000-0000-0000-0000-000000000011", time.Now().UTC().Truncate(time.Microsecond))
+	if err := store.Create(context.Background(), job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	// Act: attempt both terminal transitions without first claiming the job.
+	completionErr := store.Complete(context.Background(), job.ID)
+	failErr := store.Fail(context.Background(), job.ID, "should not be saved")
+
+	// Assert: both transitions are rejected and the job remains pending.
+	if !errors.Is(completionErr, jobs.ErrInvalidState) {
+		t.Fatalf("complete error = %v, want jobs.ErrInvalidState", completionErr)
+	}
+	if !errors.Is(failErr, jobs.ErrInvalidState) {
+		t.Fatalf("fail error = %v, want jobs.ErrInvalidState", failErr)
+	}
+	got, err := store.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("get job: %v", err)
+	}
+	if got.Status != jobs.StatusPending || got.LastError != nil || got.CompletedAt != nil {
+		t.Fatalf("pending job %#v was unexpectedly changed", got)
+	}
+}
+
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -309,6 +396,13 @@ func pendingJob(id string, createdAt time.Time) jobs.Job {
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
+}
+
+func processingJob(id string, createdAt time.Time) jobs.Job {
+	job := pendingJob(id, createdAt)
+	job.Status = jobs.StatusProcessing
+	job.Attempts = 1
+	return job
 }
 
 func assertJSONEqual(t *testing.T, got, want json.RawMessage) {

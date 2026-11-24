@@ -18,8 +18,10 @@ type Store struct {
 	pool *pgxpool.Pool
 }
 
+var _ jobs.Store = (*Store)(nil)
+
 // New creates a job store that uses the provided PostgreSQL connection pool.
-func New(pool *pgxpool.Pool) *Store {
+func New(pool *pgxpool.Pool) jobs.Store {
 	return &Store{pool: pool}
 }
 
@@ -98,6 +100,64 @@ func (s *Store) ClaimNext(ctx context.Context) (jobs.Job, error) {
 	}
 
 	return job, nil
+}
+
+// Complete marks a processing job as completed and records its completion time.
+func (s *Store) Complete(ctx context.Context, id string) error {
+	const query = `
+		UPDATE jobs
+		SET status = $2,
+			last_error = NULL,
+			completed_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND status = $3`
+
+	// Transition the job only when a worker currently owns it(processing state)
+	tag, err := s.pool.Exec(ctx, query, id, jobs.StatusCompleted, jobs.StatusProcessing)
+	if err != nil {
+		return fmt.Errorf("complete job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return s.classifyProcessingTransitionError(ctx, id)
+	}
+
+	return nil
+}
+
+// Fail marks a processing job as failed and records the failure reason.
+func (s *Store) Fail(ctx context.Context, id, reason string) error {
+	const query = `
+		UPDATE jobs
+		SET status = $2,
+			last_error = $3,
+			completed_at = NOW(),
+			updated_at = NOW()
+		WHERE id = $1 AND status = $4`
+
+	// Transition the job only when a worker currently owns it(processing state)
+	tag, err := s.pool.Exec(ctx, query, id, jobs.StatusFailed, reason, jobs.StatusProcessing)
+	if err != nil {
+		return fmt.Errorf("fail job: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return s.classifyProcessingTransitionError(ctx, id)
+	}
+
+	return nil
+}
+
+// classifyProcessingTransitionError distinguishes a missing job from one not processing.
+func (s *Store) classifyProcessingTransitionError(ctx context.Context, id string) error {
+	var status jobs.Status
+	err := s.pool.QueryRow(ctx, "SELECT status FROM jobs WHERE id = $1", id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("%w: %s", jobs.ErrNotFound, id)
+	}
+	if err != nil {
+		return fmt.Errorf("get job state: %w", err)
+	}
+
+	return fmt.Errorf("%w: job %s is %s", jobs.ErrInvalidState, id, status)
 }
 
 // scanJob maps a PostgreSQL row to Dispatchr's database-independent job model.
