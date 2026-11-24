@@ -334,7 +334,7 @@ func TestStoreFail(t *testing.T) {
 // TestStoreCompletionTransitionsRejectPendingJobs verifies workers cannot finish unclaimed jobs.
 func TestStoreCompletionTransitionsRejectPendingJobs(t *testing.T) {
 	pool := testPool(t)
-	clea rJobs(t, pool)
+	clearJobs(t, pool)
 	store := postgres.New(pool)
 
 	// Arrange a job that no worker has claimed.
