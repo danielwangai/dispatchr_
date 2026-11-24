@@ -63,6 +63,43 @@ func (s *Store) Get(ctx context.Context, id string) (jobs.Job, error) {
 	return job, nil
 }
 
+// ClaimNext atomically assigns the oldest eligible pending job to a worker.
+// It prevents concurrent workers from receiving the same job.
+// Jobs are currently claimed FIFO; priority ordering will be added later.
+func (s *Store) ClaimNext(ctx context.Context) (jobs.Job, error) {
+	// Select and lock one job, then transition it before releasing the lock.
+	const query = `
+		WITH next_job AS (
+			SELECT id
+			FROM jobs
+			WHERE status = $1 AND attempts < max_attempts
+			ORDER BY created_at, id
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE jobs
+		SET status = $2,
+			attempts = jobs.attempts + 1,
+			updated_at = NOW()
+		FROM next_job
+		WHERE jobs.id = next_job.id
+		RETURNING jobs.id, jobs.type, jobs.payload, jobs.status, jobs.attempts,
+			jobs.max_attempts, jobs.last_error, jobs.completed_at, jobs.created_at, jobs.updated_at`
+
+	// Execute the atomic claim and map the returned row.
+	job, err := scanJob(s.pool.QueryRow(ctx, query, jobs.StatusPending, jobs.StatusProcessing))
+	// An empty result means no eligible pending job exists.
+	if errors.Is(err, pgx.ErrNoRows) {
+		return jobs.Job{}, jobs.ErrNoJobAvailable
+	}
+	// Preserve unexpected database failures for the caller.
+	if err != nil {
+		return jobs.Job{}, fmt.Errorf("claim next job: %w", err)
+	}
+
+	return job, nil
+}
+
 // scanJob maps a PostgreSQL row to Dispatchr's database-independent job model.
 func scanJob(row pgx.Row) (jobs.Job, error) {
 	var (

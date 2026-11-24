@@ -8,6 +8,7 @@ import (
 	"errors"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -169,6 +170,112 @@ func TestStoreCreateRejectsZeroMaxAttempts(t *testing.T) {
 	}
 }
 
+// TestStoreClaimNextClaimsOldestPendingJob verifies FIFO claiming and state updates.
+func TestStoreClaimNextClaimsOldestPendingJob(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+
+	// Arrange two pending jobs with different submission times.
+	store := postgres.New(pool)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	oldest := pendingJob("00000000-0000-0000-0000-000000000006", now.Add(-time.Minute))
+	newer := pendingJob("00000000-0000-0000-0000-000000000007", now)
+	for _, job := range []jobs.Job{oldest, newer} {
+		if err := store.Create(context.Background(), job); err != nil {
+			t.Fatalf("create job: %v", err)
+		}
+	}
+
+	// Act: claim one job.
+	claimed, err := store.ClaimNext(context.Background())
+
+	// Assert: the older job is processing and has one attempt.
+	if err != nil {
+		t.Fatalf("claim next job: %v", err)
+	}
+	if claimed.ID != oldest.ID || claimed.Status != jobs.StatusProcessing || claimed.Attempts != 1 {
+		t.Fatalf("claimed job %#v, want oldest job processing with one attempt", claimed)
+	}
+}
+
+// TestStoreClaimNextReturnsNoJobAvailable verifies empty queues return the expected error.
+func TestStoreClaimNextReturnsNoJobAvailable(t *testing.T) {
+	pool := testPool(t)
+	clearJobs(t, pool)
+
+	// Act: claim from an empty queue.
+	_, err := postgres.New(pool).ClaimNext(context.Background())
+
+	// Assert: no work is available.
+	if !errors.Is(err, jobs.ErrNoJobAvailable) {
+		t.Fatalf("claim next error = %v, want jobs.ErrNoJobAvailable", err)
+	}
+}
+
+// TestStoreClaimNextDoesNotDoubleClaimJob verifies competing claimers cannot share a job.
+// It is like two staff members reaching for one ticket: only one may take it.
+// A start gate releases both claimers together, and several rounds increase race coverage.
+func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
+	pool := testPool(t)
+	store := postgres.New(pool)
+
+	// Repeat the race because goroutine scheduling is nondeterministic.
+	for range 20 {
+		// Start every round with one pending job.
+		clearJobs(t, pool)
+		job := pendingJob("00000000-0000-0000-0000-000000000008", time.Now().UTC().Truncate(time.Microsecond))
+		if err := store.Create(context.Background(), job); err != nil {
+			t.Fatalf("create job: %v", err)
+		}
+
+		// Prepare two claimers and hold both behind the start gate.
+		type claimResult struct {
+			job jobs.Job
+			err error
+		}
+		start := make(chan struct{})
+		ready := make(chan struct{}, 2)
+		results := make(chan claimResult, 2)
+		var waitGroup sync.WaitGroup
+		for range 2 {
+			waitGroup.Add(1)
+			go func() {
+				defer waitGroup.Done()
+				ready <- struct{}{}
+				<-start
+				claimed, err := store.ClaimNext(context.Background())
+				results <- claimResult{job: claimed, err: err}
+			}()
+		}
+
+		// Wait until both claimers are ready, then release them together.
+		for range 2 {
+			<-ready
+		}
+		close(start)
+		waitGroup.Wait()
+		close(results)
+
+		// Assert that one claimer receives the job and the other receives no work.
+		claimedCount := 0
+		for result := range results {
+			if result.err == nil {
+				if result.job.ID != job.ID {
+					t.Fatalf("claimed job ID = %s, want %s", result.job.ID, job.ID)
+				}
+				claimedCount++
+				continue
+			}
+			if !errors.Is(result.err, jobs.ErrNoJobAvailable) {
+				t.Fatalf("claim next error = %v, want jobs.ErrNoJobAvailable", result.err)
+			}
+		}
+		if claimedCount != 1 {
+			t.Fatalf("claimed count = %d, want 1", claimedCount)
+		}
+	}
+}
+
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
@@ -189,6 +296,18 @@ func clearJobs(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	if _, err := pool.Exec(context.Background(), "TRUNCATE jobs"); err != nil {
 		t.Fatalf("clear jobs: %v", err)
+	}
+}
+
+func pendingJob(id string, createdAt time.Time) jobs.Job {
+	return jobs.Job{
+		ID:          id,
+		Type:        "send_email",
+		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
+		Status:      jobs.StatusPending,
+		MaxAttempts: 3,
+		CreatedAt:   createdAt,
+		UpdatedAt:   createdAt,
 	}
 }
 
