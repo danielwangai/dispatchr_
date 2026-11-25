@@ -118,7 +118,7 @@ func (s *Store) Complete(ctx context.Context, id string) error {
 		return fmt.Errorf("complete job: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return s.classifyProcessingTransitionError(ctx, id)
+		return s.classifyProcessingError(ctx, id)
 	}
 
 	return nil
@@ -140,14 +140,14 @@ func (s *Store) Fail(ctx context.Context, id, reason string) error {
 		return fmt.Errorf("fail job: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return s.classifyProcessingTransitionError(ctx, id)
+		return s.classifyProcessingError(ctx, id)
 	}
 
 	return nil
 }
 
-// classifyProcessingTransitionError distinguishes a missing job from one not processing.
-func (s *Store) classifyProcessingTransitionError(ctx context.Context, id string) error {
+// classifyProcessingError distinguishes a missing job from one not processing.
+func (s *Store) classifyProcessingError(ctx context.Context, id string) error {
 	var status jobs.Status
 	err := s.pool.QueryRow(ctx, "SELECT status FROM jobs WHERE id = $1", id).Scan(&status)
 	if errors.Is(err, pgx.ErrNoRows) {

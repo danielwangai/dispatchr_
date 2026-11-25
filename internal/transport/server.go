@@ -60,9 +60,10 @@ func RunServer() error {
 	}
 	defer pool.Close()
 
+	store := postgres.New(pool)
 	server := NewServer(appConfig.WebServer.Port)
 
-	server.Router.InitializeRoutes(ctx, appConfig, log)
+	server.Router.InitializeRoutes(ctx, appConfig, log, store)
 
 	serverErrors := make(chan error, 1)
 	go func() {

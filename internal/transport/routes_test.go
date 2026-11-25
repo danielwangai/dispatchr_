@@ -13,7 +13,7 @@ func TestHelloWorldHandler(t *testing.T) {
 	response := httptest.NewRecorder()
 
 	router := NewRouter()
-	router.InitializeRoutes(request.Context(), testConfig(), nil)
+	router.InitializeRoutes(request.Context(), testConfig(), nil, nil)
 	router.ServeHTTP(response, request)
 
 	if response.Code != http.StatusOK {

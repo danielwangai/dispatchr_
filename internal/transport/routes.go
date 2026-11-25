@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/danielwangai/dispatchr/internal/config"
+	"github.com/danielwangai/dispatchr/internal/jobs"
 	"github.com/danielwangai/dispatchr/internal/logging"
 
 	"github.com/gorilla/mux"
@@ -24,7 +25,7 @@ func NewRouter() *Router {
 
 // InitializeRoutes registers every HTTP endpoint for the application.
 // Dependencies are supplied here so handlers remain straightforward to test.
-func (r *Router) InitializeRoutes(ctx context.Context, appConfig *config.AppConfig, logger logging.Logger) {
+func (r *Router) InitializeRoutes(ctx context.Context, appConfig *config.AppConfig, logger logging.Logger, store jobs.Store) {
 	if logger == nil {
 		logger = logging.Nop()
 	}
@@ -32,6 +33,8 @@ func (r *Router) InitializeRoutes(ctx context.Context, appConfig *config.AppConf
 	r.Use(requestLogger(ctx, logger))
 	r.HandleFunc("/", helloWorldHandler).Methods(http.MethodGet)
 	r.HandleFunc("/health", healthHandler(appConfig)).Methods(http.MethodGet)
+	r.HandleFunc("/jobs", createJobHandler(store)).Methods(http.MethodPost)
+	r.HandleFunc("/jobs/{id}", getJobHandler(store)).Methods(http.MethodGet)
 }
 
 func helloWorldHandler(w http.ResponseWriter, _ *http.Request) {
