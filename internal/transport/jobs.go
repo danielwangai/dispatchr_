@@ -5,15 +5,13 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/danielwangai/dispatchr/internal/jobs"
+	"github.com/danielwangai/dispatchr/internal/svc"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 )
-
-const defaultMaxAttempts = 3
 
 type createJobRequest struct {
 	Type        string          `json:"type"`
@@ -39,10 +37,10 @@ type getJobResponse struct {
 	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
-func createJobHandler(store jobs.Store) http.HandlerFunc {
+func createJobHandler(service svc.JobService) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
-		if store == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job storage unavailable"})
+		if service == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job service unavailable"})
 			return
 		}
 
@@ -52,26 +50,16 @@ func createJobHandler(store jobs.Store) http.HandlerFunc {
 			return
 		}
 
-		maxAttempts := defaultMaxAttempts
-		if input.MaxAttempts != nil {
-			maxAttempts = *input.MaxAttempts
-		}
-		if maxAttempts <= 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "max_attempts must be greater than zero"})
+		job, err := service.SubmitJob(request.Context(), svc.SubmitJobInput{
+			Type:        input.Type,
+			Payload:     input.Payload,
+			MaxAttempts: input.MaxAttempts,
+		})
+		if errors.Is(err, svc.ErrJobTypeRequired) || errors.Is(err, svc.ErrInvalidMaxAttempts) {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-
-		now := time.Now().UTC()
-		job := jobs.Job{
-			ID:          uuid.NewString(),
-			Type:        strings.TrimSpace(input.Type),
-			Payload:     input.Payload,
-			Status:      jobs.StatusPending,
-			MaxAttempts: maxAttempts,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		if err := store.Create(request.Context(), job); err != nil {
+		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "create job"})
 			return
 		}
@@ -80,10 +68,10 @@ func createJobHandler(store jobs.Store) http.HandlerFunc {
 	}
 }
 
-func getJobHandler(store jobs.Store) http.HandlerFunc {
+func getJobHandler(service svc.JobService) http.HandlerFunc {
 	return func(w http.ResponseWriter, request *http.Request) {
-		if store == nil {
-			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job storage unavailable"})
+		if service == nil {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "job service unavailable"})
 			return
 		}
 
@@ -93,7 +81,7 @@ func getJobHandler(store jobs.Store) http.HandlerFunc {
 			return
 		}
 
-		job, err := store.Get(request.Context(), id)
+		job, err := service.GetJob(request.Context(), id)
 		if errors.Is(err, jobs.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 			return
@@ -130,9 +118,6 @@ func decodeCreateJobRequest(request *http.Request) (createJobRequest, error) {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return createJobRequest{}, errors.New("request body must contain one JSON object")
-	}
-	if strings.TrimSpace(input.Type) == "" {
-		return createJobRequest{}, errors.New("type is required")
 	}
 	if len(input.Payload) == 0 || !json.Valid(input.Payload) {
 		return createJobRequest{}, errors.New("payload must be valid JSON")

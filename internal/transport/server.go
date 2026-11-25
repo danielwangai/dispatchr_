@@ -13,6 +13,7 @@ import (
 	"github.com/danielwangai/dispatchr/internal/config"
 	"github.com/danielwangai/dispatchr/internal/logging"
 	"github.com/danielwangai/dispatchr/internal/storage/postgres"
+	"github.com/danielwangai/dispatchr/internal/svc"
 )
 
 // Server owns the application's HTTP transport dependencies.
@@ -61,9 +62,10 @@ func RunServer() error {
 	defer pool.Close()
 
 	store := postgres.New(pool)
+	jobService := svc.New(store)
 	server := NewServer(appConfig.WebServer.Port)
 
-	server.Router.InitializeRoutes(ctx, appConfig, log, store)
+	server.Router.InitializeRoutes(ctx, appConfig, log, jobService)
 
 	serverErrors := make(chan error, 1)
 	go func() {
