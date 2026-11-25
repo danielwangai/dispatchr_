@@ -34,6 +34,7 @@ func (r *Router) InitializeRoutes(ctx context.Context, appConfig *config.AppConf
 	r.HandleFunc("/", helloWorldHandler).Methods(http.MethodGet)
 	r.HandleFunc("/health", healthHandler(appConfig)).Methods(http.MethodGet)
 	r.HandleFunc("/jobs", createJobHandler(store)).Methods(http.MethodPost)
+	r.HandleFunc("/jobs/{id}", getJobHandler(store)).Methods(http.MethodGet)
 }
 
 func helloWorldHandler(w http.ResponseWriter, _ *http.Request) {
