@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielwangai/dispatchr/internal/jobs"
+	"github.com/danielwangai/dispatchr"
 	"github.com/danielwangai/dispatchr/internal/svc"
 	"github.com/gorilla/mux"
 )
@@ -17,7 +17,7 @@ import (
 func TestCreateJobHandlerSubmitsRequestToService(t *testing.T) {
 	// Arrange a fake service so this test covers HTTP behavior without PostgreSQL.
 	service := &fakeJobService{
-		submittedJob: jobs.Job{ID: "job-123", Status: jobs.StatusPending},
+		submittedJob: dispatchr.Job{ID: "job-123", Status: dispatchr.StatusPending},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/jobs", strings.NewReader(`{"type":"send_email","payload":{"to":"customer@example.com"}}`))
 	response := httptest.NewRecorder()
@@ -37,7 +37,7 @@ func TestCreateJobHandlerSubmitsRequestToService(t *testing.T) {
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.JobID != "job-123" || body.Status != jobs.StatusPending {
+	if body.JobID != "job-123" || body.Status != dispatchr.StatusPending {
 		t.Fatalf("response = %#v, want accepted job", body)
 	}
 }
@@ -79,9 +79,9 @@ func TestGetJobHandlerReturnsServiceJob(t *testing.T) {
 	// Arrange a fake job returned by the application layer.
 	id := "00000000-0000-0000-0000-000000000001"
 	createdAt := time.Date(2026, time.November, 25, 12, 0, 0, 0, time.UTC)
-	service := &fakeJobService{job: jobs.Job{
+	service := &fakeJobService{job: dispatchr.Job{
 		ID: id, Type: "send_email", Payload: json.RawMessage(`{"to":"customer@example.com"}`),
-		Status: jobs.StatusPending, MaxAttempts: 3, CreatedAt: createdAt, UpdatedAt: createdAt,
+		Status: dispatchr.StatusPending, MaxAttempts: 3, CreatedAt: createdAt, UpdatedAt: createdAt,
 	}}
 	request := httptest.NewRequest(http.MethodGet, "/jobs/"+id, nil)
 	request = withRouteID(request, id)
@@ -120,7 +120,7 @@ func TestGetJobHandlerRejectsMalformedIDBeforeService(t *testing.T) {
 func TestGetJobHandlerMapsMissingJob(t *testing.T) {
 	// Arrange a valid UUID for which the service finds no persisted job.
 	id := "00000000-0000-0000-0000-000000000002"
-	service := &fakeJobService{getErr: jobs.ErrNotFound}
+	service := &fakeJobService{getErr: dispatchr.ErrNotFound}
 	request := withRouteID(httptest.NewRequest(http.MethodGet, "/jobs/"+id, nil), id)
 	response := httptest.NewRecorder()
 
@@ -139,22 +139,22 @@ func withRouteID(request *http.Request, id string) *http.Request {
 
 type fakeJobService struct {
 	submitInput  svc.SubmitJobInput
-	submittedJob jobs.Job
+	submittedJob dispatchr.Job
 	submitErr    error
 	submitCalled bool
-	job          jobs.Job
+	job          dispatchr.Job
 	getErr       error
 	getID        string
 	getCalled    bool
 }
 
-func (s *fakeJobService) SubmitJob(_ context.Context, input svc.SubmitJobInput) (jobs.Job, error) {
+func (s *fakeJobService) SubmitJob(_ context.Context, input svc.SubmitJobInput) (dispatchr.Job, error) {
 	s.submitCalled = true
 	s.submitInput = input
 	return s.submittedJob, s.submitErr
 }
 
-func (s *fakeJobService) GetJob(_ context.Context, id string) (jobs.Job, error) {
+func (s *fakeJobService) GetJob(_ context.Context, id string) (dispatchr.Job, error) {
 	s.getCalled = true
 	s.getID = id
 	return s.job, s.getErr

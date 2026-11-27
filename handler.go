@@ -6,8 +6,6 @@ import (
 	"errors"
 	"strings"
 	"sync"
-
-	"github.com/danielwangai/dispatchr/internal/jobs"
 )
 
 var (
@@ -20,11 +18,6 @@ var (
 	// ErrHandlerNotFound indicates that no handler is registered for a job type.
 	ErrHandlerNotFound = errors.New("job handler not found")
 )
-
-// Job is the job data supplied to a registered handler.
-// It aliases Dispatchr's domain model so handlers receive no transport or
-// database-specific representation.
-type Job = jobs.Job
 
 // Handler executes one job. Returning an error tells a worker that execution
 // failed, allowing it to record the failure in the job store.

@@ -12,9 +12,9 @@ import (
 	"testing"
 
 	"github.com/danielwangai/dispatchr/internal/config"
-	"github.com/danielwangai/dispatchr/internal/storage/postgres"
 	"github.com/danielwangai/dispatchr/internal/svc"
 	"github.com/danielwangai/dispatchr/internal/transport"
+	"github.com/danielwangai/dispatchr/postgres"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -23,7 +23,7 @@ func TestJobAPISubmitAndGet(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
 	router := transport.NewRouter()
-	router.InitializeRoutes(context.Background(), testConfig(), nil, svc.New(postgres.New(pool)))
+	router.InitializeRoutes(context.Background(), testConfig(), nil, svc.New(postgres.NewStore(pool)))
 
 	// Act: submit a job through the /jobs HTTP endpoint.
 	createRequest := httptest.NewRequest(http.MethodPost, "/jobs", bytes.NewBufferString(`{"type":"send_email","payload":{"to":"customer@example.com"}}`))
@@ -74,7 +74,7 @@ func TestJobAPIGetMissingJob(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
 	router := transport.NewRouter()
-	router.InitializeRoutes(context.Background(), testConfig(), nil, svc.New(postgres.New(pool)))
+	router.InitializeRoutes(context.Background(), testConfig(), nil, svc.New(postgres.NewStore(pool)))
 
 	// Act: retrieve a syntactically valid ID that is not stored.
 	request := httptest.NewRequest(http.MethodGet, "/jobs/00000000-0000-0000-0000-0000000000aa", nil)

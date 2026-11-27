@@ -1,5 +1,4 @@
-// Package jobs contains Dispatchr's core job model and storage contract.
-package jobs
+package dispatchr
 
 import (
 	"encoding/json"
@@ -16,7 +15,7 @@ const (
 	StatusFailed     Status = "failed"
 )
 
-// Job is a unit of background work persisted by Dispatchr.
+// Job is a unit of background work persisted and processed by Dispatchr.
 type Job struct {
 	ID          string
 	Type        string

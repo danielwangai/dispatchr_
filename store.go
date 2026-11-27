@@ -1,4 +1,4 @@
-package jobs
+package dispatchr
 
 import (
 	"context"
@@ -14,9 +14,8 @@ var (
 	ErrInvalidState = errors.New("invalid job state")
 )
 
-// Store contains method for coordinating the lifecycle jobs.
-//
-// Storage adapters such as PostgreSQL and MySQL implement this contract.
+// Store persists jobs and coordinates their lifecycle transitions.
+// Database adapters such as PostgreSQL implement this interface.
 type Store interface {
 	Create(ctx context.Context, job Job) error
 	Get(ctx context.Context, id string) (Job, error)

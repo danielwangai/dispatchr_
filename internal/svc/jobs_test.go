@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielwangai/dispatchr/internal/jobs"
+	"github.com/danielwangai/dispatchr"
 )
 
 func TestServiceSubmitJobBuildsAndStoresPendingJob(t *testing.T) {
@@ -27,7 +27,7 @@ func TestServiceSubmitJobBuildsAndStoresPendingJob(t *testing.T) {
 	}
 
 	// Assert: the service owns generated metadata and stores a pending job.
-	if job.ID != "job-123" || job.Type != "send_email" || job.Status != jobs.StatusPending || job.MaxAttempts != defaultMaxAttempts {
+	if job.ID != "job-123" || job.Type != "send_email" || job.Status != dispatchr.StatusPending || job.MaxAttempts != defaultMaxAttempts {
 		t.Fatalf("job = %#v, want generated pending job", job)
 	}
 	if !job.CreatedAt.Equal(now) || !job.UpdatedAt.Equal(now) || store.created.ID != job.ID {
@@ -73,7 +73,7 @@ func TestServiceSubmitJobRejectsInvalidMaxAttempts(t *testing.T) {
 
 func TestServiceGetJobDelegatesToStore(t *testing.T) {
 	// Arrange a store result.
-	want := jobs.Job{ID: "job-123", Type: "send_email"}
+	want := dispatchr.Job{ID: "job-123", Type: "send_email"}
 	store := &fakeStore{job: want}
 	service := New(store)
 
@@ -90,27 +90,27 @@ func TestServiceGetJobDelegatesToStore(t *testing.T) {
 }
 
 type fakeStore struct {
-	created      jobs.Job
+	created      dispatchr.Job
 	createCalled bool
-	job          jobs.Job
+	job          dispatchr.Job
 	getID        string
 }
 
-func (s *fakeStore) Create(_ context.Context, job jobs.Job) error {
+func (s *fakeStore) Create(_ context.Context, job dispatchr.Job) error {
 	s.createCalled = true
 	s.created = job
 	return nil
 }
 
-func (s *fakeStore) Get(_ context.Context, id string) (jobs.Job, error) {
+func (s *fakeStore) Get(_ context.Context, id string) (dispatchr.Job, error) {
 	s.getID = id
 	return s.job, nil
 }
 
-func (*fakeStore) ClaimNext(context.Context) (jobs.Job, error) {
-	return jobs.Job{}, jobs.ErrNoJobAvailable
+func (*fakeStore) ClaimNext(context.Context) (dispatchr.Job, error) {
+	return dispatchr.Job{}, dispatchr.ErrNoJobAvailable
 }
 func (*fakeStore) Complete(context.Context, string) error     { return nil }
 func (*fakeStore) Fail(context.Context, string, string) error { return nil }
 
-var _ jobs.Store = (*fakeStore)(nil)
+var _ dispatchr.Store = (*fakeStore)(nil)

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danielwangai/dispatchr/internal/jobs"
-	"github.com/danielwangai/dispatchr/internal/storage/postgres"
+	"github.com/danielwangai/dispatchr"
+	"github.com/danielwangai/dispatchr/postgres"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -24,18 +24,18 @@ func TestStoreCreateAndGet(t *testing.T) {
 
 	// Arrange.
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	job := jobs.Job{
+	job := dispatchr.Job{
 		ID:          "00000000-0000-0000-0000-000000000001",
 		Type:        "send_email",
 		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
-		Status:      jobs.StatusPending,
+		Status:      dispatchr.StatusPending,
 		Attempts:    0,
 		MaxAttempts: 3,
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
 
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 	// Act.
 	if err := store.Create(context.Background(), job); err != nil {
 		t.Fatalf("create job: %v", err)
@@ -64,11 +64,11 @@ func TestStoreGetNonExistentJob(t *testing.T) {
 	clearJobs(t, pool)
 
 	// Act.
-	_, err := postgres.New(pool).Get(context.Background(), "00000000-0000-0000-0000-000000000002")
+	_, err := postgres.NewStore(pool).Get(context.Background(), "00000000-0000-0000-0000-000000000002")
 
 	// Assert.
-	if !errors.Is(err, jobs.ErrNotFound) {
-		t.Fatalf("get missing job error = %v, want jobs.ErrNotFound", err)
+	if !errors.Is(err, dispatchr.ErrNotFound) {
+		t.Fatalf("get missing job error = %v, want dispatchr.ErrNotFound", err)
 	}
 }
 
@@ -79,11 +79,11 @@ func TestStoreCreateAndGetFailedJob(t *testing.T) {
 	// Arrange.
 	lastError := "email provider returned 503"
 	completedAt := time.Now().UTC().Truncate(time.Microsecond)
-	job := jobs.Job{
+	job := dispatchr.Job{
 		ID:          "00000000-0000-0000-0000-000000000003",
 		Type:        "send_email",
 		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
-		Status:      jobs.StatusFailed,
+		Status:      dispatchr.StatusFailed,
 		Attempts:    3,
 		MaxAttempts: 3,
 		LastError:   &lastError,
@@ -92,7 +92,7 @@ func TestStoreCreateAndGetFailedJob(t *testing.T) {
 		UpdatedAt:   completedAt,
 	}
 
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 	// Act.
 	if err := store.Create(context.Background(), job); err != nil {
 		t.Fatalf("create failed job: %v", err)
@@ -118,16 +118,16 @@ func TestStoreCreateRejectsDuplicateID(t *testing.T) {
 
 	// Arrange.
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	job := jobs.Job{
+	job := dispatchr.Job{
 		ID:          "00000000-0000-0000-0000-000000000004",
 		Type:        "send_email",
 		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
-		Status:      jobs.StatusPending,
+		Status:      dispatchr.StatusPending,
 		MaxAttempts: 3,
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 	// create job(first time)
 	if err := store.Create(context.Background(), job); err != nil {
 		t.Fatalf("create first job: %v", err)
@@ -150,18 +150,18 @@ func TestStoreCreateRejectsZeroMaxAttempts(t *testing.T) {
 
 	// Arrange.
 	createdAt := time.Now().UTC().Truncate(time.Microsecond)
-	job := jobs.Job{
+	job := dispatchr.Job{
 		ID:          "00000000-0000-0000-0000-000000000005",
 		Type:        "send_email",
 		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
-		Status:      jobs.StatusPending,
+		Status:      dispatchr.StatusPending,
 		MaxAttempts: 0,
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
 
 	// Act.
-	err := postgres.New(pool).Create(context.Background(), job)
+	err := postgres.NewStore(pool).Create(context.Background(), job)
 
 	// Assert.
 	var databaseError *pgconn.PgError
@@ -176,11 +176,11 @@ func TestStoreClaimNextClaimsOldestPendingJob(t *testing.T) {
 	clearJobs(t, pool)
 
 	// Arrange two pending jobs with different submission times.
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	oldest := pendingJob("00000000-0000-0000-0000-000000000006", now.Add(-time.Minute))
 	newer := pendingJob("00000000-0000-0000-0000-000000000007", now)
-	for _, job := range []jobs.Job{oldest, newer} {
+	for _, job := range []dispatchr.Job{oldest, newer} {
 		if err := store.Create(context.Background(), job); err != nil {
 			t.Fatalf("create job: %v", err)
 		}
@@ -193,7 +193,7 @@ func TestStoreClaimNextClaimsOldestPendingJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("claim next job: %v", err)
 	}
-	if claimed.ID != oldest.ID || claimed.Status != jobs.StatusProcessing || claimed.Attempts != 1 {
+	if claimed.ID != oldest.ID || claimed.Status != dispatchr.StatusProcessing || claimed.Attempts != 1 {
 		t.Fatalf("claimed job %#v, want oldest job processing with one attempt", claimed)
 	}
 }
@@ -204,11 +204,11 @@ func TestStoreClaimNextReturnsNoJobAvailable(t *testing.T) {
 	clearJobs(t, pool)
 
 	// Act: claim from an empty queue.
-	_, err := postgres.New(pool).ClaimNext(context.Background())
+	_, err := postgres.NewStore(pool).ClaimNext(context.Background())
 
 	// Assert: no work is available.
-	if !errors.Is(err, jobs.ErrNoJobAvailable) {
-		t.Fatalf("claim next error = %v, want jobs.ErrNoJobAvailable", err)
+	if !errors.Is(err, dispatchr.ErrNoJobAvailable) {
+		t.Fatalf("claim next error = %v, want dispatchr.ErrNoJobAvailable", err)
 	}
 }
 
@@ -217,7 +217,7 @@ func TestStoreClaimNextReturnsNoJobAvailable(t *testing.T) {
 // A start gate releases both claimers together, and several rounds increase race coverage.
 func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
 	pool := testPool(t)
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 
 	// Repeat the race because goroutine scheduling is nondeterministic.
 	for range 20 {
@@ -230,7 +230,7 @@ func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
 
 		// Prepare two claimers and hold both behind the start gate.
 		type claimResult struct {
-			job jobs.Job
+			job dispatchr.Job
 			err error
 		}
 		start := make(chan struct{})
@@ -266,8 +266,8 @@ func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
 				claimedCount++
 				continue
 			}
-			if !errors.Is(result.err, jobs.ErrNoJobAvailable) {
-				t.Fatalf("claim next error = %v, want jobs.ErrNoJobAvailable", result.err)
+			if !errors.Is(result.err, dispatchr.ErrNoJobAvailable) {
+				t.Fatalf("claim next error = %v, want dispatchr.ErrNoJobAvailable", result.err)
 			}
 		}
 		if claimedCount != 1 {
@@ -280,7 +280,7 @@ func TestStoreClaimNextDoesNotDoubleClaimJob(t *testing.T) {
 func TestStoreComplete(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 
 	// Arrange a job already claimed by a worker.
 	job := processingJob("00000000-0000-0000-0000-000000000009", time.Now().UTC().Truncate(time.Microsecond))
@@ -298,7 +298,7 @@ func TestStoreComplete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if got.Status != jobs.StatusCompleted || got.CompletedAt == nil || got.LastError != nil {
+	if got.Status != dispatchr.StatusCompleted || got.CompletedAt == nil || got.LastError != nil {
 		t.Fatalf("completed job %#v, want completed status, completion time, and no error", got)
 	}
 }
@@ -307,7 +307,7 @@ func TestStoreComplete(t *testing.T) {
 func TestStoreFail(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 
 	// Arrange a job already claimed by a worker.
 	job := processingJob("00000000-0000-0000-0000-000000000010", time.Now().UTC().Truncate(time.Microsecond))
@@ -326,16 +326,16 @@ func TestStoreFail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if got.Status != jobs.StatusFailed || got.CompletedAt == nil || got.LastError == nil || *got.LastError != reason {
+	if got.Status != dispatchr.StatusFailed || got.CompletedAt == nil || got.LastError == nil || *got.LastError != reason {
 		t.Fatalf("failed job %#v, want failed status, completion time, and error %q", got, reason)
 	}
 }
 
-// TestStoreCompletionTransitionsRejectPendingJobs verifies workers cannot finish unclaimed jobs.
+// TestStoreCompletionTransitionsRejectPendingJobs verifies workers cannot finish unclaimed dispatchr.
 func TestStoreCompletionTransitionsRejectPendingJobs(t *testing.T) {
 	pool := testPool(t)
 	clearJobs(t, pool)
-	store := postgres.New(pool)
+	store := postgres.NewStore(pool)
 
 	// Arrange a job that no worker has claimed.
 	job := pendingJob("00000000-0000-0000-0000-000000000011", time.Now().UTC().Truncate(time.Microsecond))
@@ -348,17 +348,17 @@ func TestStoreCompletionTransitionsRejectPendingJobs(t *testing.T) {
 	failErr := store.Fail(context.Background(), job.ID, "should not be saved")
 
 	// Assert: both transitions are rejected and the job remains pending.
-	if !errors.Is(completionErr, jobs.ErrInvalidState) {
-		t.Fatalf("complete error = %v, want jobs.ErrInvalidState", completionErr)
+	if !errors.Is(completionErr, dispatchr.ErrInvalidState) {
+		t.Fatalf("complete error = %v, want dispatchr.ErrInvalidState", completionErr)
 	}
-	if !errors.Is(failErr, jobs.ErrInvalidState) {
-		t.Fatalf("fail error = %v, want jobs.ErrInvalidState", failErr)
+	if !errors.Is(failErr, dispatchr.ErrInvalidState) {
+		t.Fatalf("fail error = %v, want dispatchr.ErrInvalidState", failErr)
 	}
 	got, err := store.Get(context.Background(), job.ID)
 	if err != nil {
 		t.Fatalf("get job: %v", err)
 	}
-	if got.Status != jobs.StatusPending || got.LastError != nil || got.CompletedAt != nil {
+	if got.Status != dispatchr.StatusPending || got.LastError != nil || got.CompletedAt != nil {
 		t.Fatalf("pending job %#v was unexpectedly changed", got)
 	}
 }
@@ -386,21 +386,21 @@ func clearJobs(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func pendingJob(id string, createdAt time.Time) jobs.Job {
-	return jobs.Job{
+func pendingJob(id string, createdAt time.Time) dispatchr.Job {
+	return dispatchr.Job{
 		ID:          id,
 		Type:        "send_email",
 		Payload:     json.RawMessage(`{"to":"customer@example.com"}`),
-		Status:      jobs.StatusPending,
+		Status:      dispatchr.StatusPending,
 		MaxAttempts: 3,
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
 }
 
-func processingJob(id string, createdAt time.Time) jobs.Job {
+func processingJob(id string, createdAt time.Time) dispatchr.Job {
 	job := pendingJob(id, createdAt)
-	job.Status = jobs.StatusProcessing
+	job.Status = dispatchr.StatusProcessing
 	job.Attempts = 1
 	return job
 }
