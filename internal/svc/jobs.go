@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/danielwangai/dispatchr/internal/jobs"
+	"github.com/danielwangai/dispatchr"
 	"github.com/google/uuid"
 )
 
@@ -22,8 +22,8 @@ var (
 
 // JobService defines the job use cases required by HTTP transport.
 type JobService interface {
-	SubmitJob(ctx context.Context, input SubmitJobInput) (jobs.Job, error)
-	GetJob(ctx context.Context, id string) (jobs.Job, error)
+	SubmitJob(ctx context.Context, input SubmitJobInput) (dispatchr.Job, error)
+	GetJob(ctx context.Context, id string) (dispatchr.Job, error)
 }
 
 // SubmitJobInput contains the producer-controlled details of a new job.
@@ -35,7 +35,7 @@ type SubmitJobInput struct {
 
 // Service implements job-related application use cases.
 type Service struct {
-	store jobs.Store
+	store dispatchr.Store
 	newID func() string
 	now   func() time.Time
 }
@@ -43,21 +43,21 @@ type Service struct {
 var _ JobService = (*Service)(nil)
 
 // New creates a job service with production ID and clock dependencies.
-func New(store jobs.Store) *Service {
+func New(store dispatchr.Store) *Service {
 	return NewWithDependencies(store, uuid.NewString, time.Now)
 }
 
 // NewWithDependencies creates a job service with replaceable time and ID sources.
 // It is useful when deterministic tests need fixed values.
-func NewWithDependencies(store jobs.Store, newID func() string, now func() time.Time) *Service {
+func NewWithDependencies(store dispatchr.Store, newID func() string, now func() time.Time) *Service {
 	return &Service{store: store, newID: newID, now: now}
 }
 
 // SubmitJob validates business rules, creates job metadata, and persists the job.
-func (s *Service) SubmitJob(ctx context.Context, input SubmitJobInput) (jobs.Job, error) {
+func (s *Service) SubmitJob(ctx context.Context, input SubmitJobInput) (dispatchr.Job, error) {
 	jobType := strings.TrimSpace(input.Type)
 	if jobType == "" {
-		return jobs.Job{}, ErrJobTypeRequired
+		return dispatchr.Job{}, ErrJobTypeRequired
 	}
 
 	maxAttempts := defaultMaxAttempts
@@ -65,27 +65,27 @@ func (s *Service) SubmitJob(ctx context.Context, input SubmitJobInput) (jobs.Job
 		maxAttempts = *input.MaxAttempts
 	}
 	if maxAttempts <= 0 {
-		return jobs.Job{}, ErrInvalidMaxAttempts
+		return dispatchr.Job{}, ErrInvalidMaxAttempts
 	}
 
 	createdAt := s.now().UTC()
-	job := jobs.Job{
+	job := dispatchr.Job{
 		ID:          s.newID(),
 		Type:        jobType,
 		Payload:     input.Payload,
-		Status:      jobs.StatusPending,
+		Status:      dispatchr.StatusPending,
 		MaxAttempts: maxAttempts,
 		CreatedAt:   createdAt,
 		UpdatedAt:   createdAt,
 	}
 	if err := s.store.Create(ctx, job); err != nil {
-		return jobs.Job{}, err
+		return dispatchr.Job{}, err
 	}
 
 	return job, nil
 }
 
 // GetJob retrieves a job by ID from the configured store.
-func (s *Service) GetJob(ctx context.Context, id string) (jobs.Job, error) {
+func (s *Service) GetJob(ctx context.Context, id string) (dispatchr.Job, error) {
 	return s.store.Get(ctx, id)
 }

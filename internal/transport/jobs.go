@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/danielwangai/dispatchr/internal/jobs"
+	"github.com/danielwangai/dispatchr"
 	"github.com/danielwangai/dispatchr/internal/svc"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
@@ -20,21 +20,21 @@ type createJobRequest struct {
 }
 
 type createJobResponse struct {
-	JobID  string      `json:"job_id"`
-	Status jobs.Status `json:"status"`
+	JobID  string           `json:"job_id"`
+	Status dispatchr.Status `json:"status"`
 }
 
 type getJobResponse struct {
-	JobID       string          `json:"job_id"`
-	Type        string          `json:"type"`
-	Payload     json.RawMessage `json:"payload"`
-	Status      jobs.Status     `json:"status"`
-	Attempts    int             `json:"attempts"`
-	MaxAttempts int             `json:"max_attempts"`
-	LastError   *string         `json:"last_error,omitempty"`
-	CompletedAt *time.Time      `json:"completed_at,omitempty"`
-	CreatedAt   time.Time       `json:"created_at"`
-	UpdatedAt   time.Time       `json:"updated_at"`
+	JobID       string           `json:"job_id"`
+	Type        string           `json:"type"`
+	Payload     json.RawMessage  `json:"payload"`
+	Status      dispatchr.Status `json:"status"`
+	Attempts    int              `json:"attempts"`
+	MaxAttempts int              `json:"max_attempts"`
+	LastError   *string          `json:"last_error,omitempty"`
+	CompletedAt *time.Time       `json:"completed_at,omitempty"`
+	CreatedAt   time.Time        `json:"created_at"`
+	UpdatedAt   time.Time        `json:"updated_at"`
 }
 
 func createJobHandler(service svc.JobService) http.HandlerFunc {
@@ -82,7 +82,7 @@ func getJobHandler(service svc.JobService) http.HandlerFunc {
 		}
 
 		job, err := service.GetJob(request.Context(), id)
-		if errors.Is(err, jobs.ErrNotFound) {
+		if errors.Is(err, dispatchr.ErrNotFound) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": "job not found"})
 			return
 		}
