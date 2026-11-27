@@ -57,21 +57,26 @@ The API inserts a job through the configured storage adapter and commits it befo
 POST /jobs -> validate -> insert job -> commit -> return job ID
 ```
 
-## Job lifecycle
+## Current job lifecycle
 
-The initial job states are:
+This diagram shows only the behaviour implemented in the current version.
 
-```text
-pending -> processing -> completed
-                     -> failed
+```mermaid
+flowchart TB
+    Submitted((Job submitted)) --> Pending["Pending"]
+    Pending -->|"A worker takes the job"| Processing["Processing"]
+    Processing -->|"Work succeeds"| Completed["Completed"]
+    Processing -->|"Work fails or no handler exists"| Failed["Failed"]
+    Completed --> End((End))
+    Failed --> End
 ```
 
 - `pending`: accepted and eligible for a worker.
-- `processing`: claimed by a worker.
-- `completed`: handler completed successfully.
-- `failed`: handler reached a terminal failure.
+- `processing`: atomically claimed by one worker.
+- `completed`: the handler succeeded and completion was persisted.
+- `failed`: the handler failed, or no handler was registered for its type.
 
-Later phases will add `retrying`, `scheduled`, and `dead_letter` states.
+Future phases add retry, delayed, priority, and dead-letter transitions.
 
 ## Worker discovery and claiming
 
@@ -81,24 +86,25 @@ Workers use a pull model: each worker asks the configured storage adapter for on
 SELECT id
 FROM jobs
 WHERE status = 'pending'
-  AND run_at <= now()
+  AND attempts < max_attempts
 FOR UPDATE SKIP LOCKED
 LIMIT 1;
 ```
 
 `FOR UPDATE SKIP LOCKED` lets concurrent workers skip jobs already being claimed by another worker. The worker commits its claim before executing the handler, so slow external work never holds a database transaction open.
 
-## Delivery guarantee
+## Current delivery behaviour
 
-Dispatchr provides **at-least-once delivery**, not exactly-once delivery.
+Dispatchr already guarantees durable acceptance: once `POST /jobs` succeeds,
+the job is stored in PostgreSQL and survives an API restart.
 
-If a worker performs an external side effect and crashes before recording completion, Dispatchr retries the job. The same job may therefore execute more than once.
+It does **not yet** provide full at-least-once delivery. If a worker crashes
+after claiming a job, the job remains `processing` because lease expiry and
+recovery are not implemented yet.
 
-```text
-worker sends invoice -> worker crashes -> completion is unrecorded -> job retries
-```
-
-This choice prioritizes avoiding lost work over preventing every duplicate execution.
+The target model is at-least-once delivery: an expired lease will make an
+abandoned job eligible again. That prevents silent loss, but means a handler
+may run more than once after a crash.
 
 ## Idempotent handlers
 
@@ -129,3 +135,19 @@ GET  /jobs/{id}  retrieve status, attempts, result, or error
 ```
 
 The API returns job status from the configured storage adapter; clients do not infer completion from successful submission.
+
+## Component architecture
+
+```mermaid
+flowchart TD
+    Client["Client application"] -->|"Submit a job"| API["Job API"]
+    API -->|"Save as pending"| Storage[("Job storage<br/>PostgreSQL")]
+
+    Storage -->|"Give one pending job"| Worker["Background worker"]
+    Worker -->|"Run the job"| Handler["Application job handler"]
+    Handler -->|"Success or error"| Worker
+    Worker -->|"Record completed or failed"| Storage
+
+    Client -. "Check job status" .-> API
+    API -. "Read job status" .-> Storage
+```
